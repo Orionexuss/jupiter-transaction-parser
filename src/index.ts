@@ -18,7 +18,7 @@ const arraysEqual = (a: Uint8Array, b: Uint8Array): boolean =>
 async function main() {
   const rpc = createSolanaRpc('https://api.mainnet-beta.solana.com');
   const txId = signature(
-    '4kSiJXqP5SZsVsURBQYyVs1kJqDqsC195nwP9ZgTQ62q3d4UyXHMgLg2HaQvgy5jr9wykpfQoxCJ2ErU53JzFzPZ'
+    'GjL1hQDphjM1kByguqgZxecwbPXk1iXQhRzem4jGXGhDPqdBEgszuRj5BVnVGQhFMt73VRygqW5F1fWMDncoF7w'
   );
 
   const rpcTx = await rpc
@@ -37,6 +37,15 @@ async function main() {
   // Instruction discriminators for Jupiter V6
   const ROUTE_V2_IX = sha256(new TextEncoder().encode('global:route_v2')).subarray(0, 8);
   const ROUTE_IX = sha256(new TextEncoder().encode('global:route')).subarray(0, 8);
+  const SHARED_ACCOUNTS_ROUTE_V2_IX = sha256(
+    new TextEncoder().encode('global:shared_accounts_route_v2')
+  ).subarray(0, 8);
+  const SHARED_ACCOUNTS_ROUTE_IX = sha256(
+    new TextEncoder().encode('global:shared_accounts_route')
+  ).subarray(0, 8);
+  const EXACT_OUT_ROUTE_V2_IX = sha256(
+    new TextEncoder().encode('global:exact_out_route_v2')
+  ).subarray(0, 8);
 
   let instructionFound = '';
 
@@ -47,6 +56,10 @@ async function main() {
 
     if (arraysEqual(data, ROUTE_IX)) instructionFound = 'ROUTE';
     else if (arraysEqual(data, ROUTE_V2_IX)) instructionFound = 'ROUTE_V2';
+    else if (arraysEqual(data, SHARED_ACCOUNTS_ROUTE_V2_IX))
+      instructionFound = 'SHARED_ACCOUNTS_ROUTE_V2';
+    else if (arraysEqual(data, SHARED_ACCOUNTS_ROUTE_IX))
+      instructionFound = 'SHARED_ACCOUNTS_ROUTE';
 
     return program === JUPITER_AGGREGATOR_V6 && instructionFound;
   });
@@ -103,7 +116,11 @@ async function main() {
 
     const eventData = data.subarray(16);
 
-    if (instructionFound === 'ROUTE_V2') {
+    if (
+      instructionFound === 'ROUTE_V2' ||
+      instructionFound === 'SHARED_ACCOUNTS_ROUTE_V2' ||
+      instructionFound === 'EXACT_OUT_ROUTE_V2'
+    ) {
       const event = SwapsEventDecoder.decode(eventData);
 
       for (const swap of event.swapEvents) {
