@@ -47,21 +47,33 @@ async function main() {
     new TextEncoder().encode('global:exact_out_route_v2')
   ).subarray(0, 8);
 
+  const ROUTE_WITH_TOKEN_LEDGER_IX = sha256(
+    new TextEncoder().encode('global:route_with_token_ledger')
+  ).subarray(0, 8);
+  const SHARED_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER_IX = sha256(
+    new TextEncoder().encode('global:shared_accounts_route_with_token_ledger')
+  ).subarray(0, 8);
+
+  const routeInstructions: Array<[string, Uint8Array]> = [
+    ['ROUTE', ROUTE_IX],
+    ['ROUTE_V2', ROUTE_V2_IX],
+    ['SHARED_ACCOUNTS_ROUTE', SHARED_ACCOUNTS_ROUTE_IX],
+    ['SHARED_ACCOUNTS_ROUTE_V2', SHARED_ACCOUNTS_ROUTE_V2_IX],
+    ['EXACT_OUT_ROUTE_V2', EXACT_OUT_ROUTE_V2_IX],
+    ['ROUTE_WITH_TOKEN_LEDGER', ROUTE_WITH_TOKEN_LEDGER_IX],
+    ['SHARED_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER', SHARED_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER_IX],
+  ];
+
   let instructionFound = '';
 
-  // Find the Jupiter swap instruction
+  // Find the Jupiter swap instruction (only instructions of the Jupiter program count)
   const swapIxIdx = rpcTx.transaction.message.instructions.findIndex((ix) => {
-    const data = getBase58Encoder().encode(ix.data).subarray(0, 8);
     const program = rpcTx.transaction.message.accountKeys[ix.programIdIndex];
+    if (program !== JUPITER_AGGREGATOR_V6) return false;
 
-    if (arraysEqual(data, ROUTE_IX)) instructionFound = 'ROUTE';
-    else if (arraysEqual(data, ROUTE_V2_IX)) instructionFound = 'ROUTE_V2';
-    else if (arraysEqual(data, SHARED_ACCOUNTS_ROUTE_V2_IX))
-      instructionFound = 'SHARED_ACCOUNTS_ROUTE_V2';
-    else if (arraysEqual(data, SHARED_ACCOUNTS_ROUTE_IX))
-      instructionFound = 'SHARED_ACCOUNTS_ROUTE';
-
-    return program === JUPITER_AGGREGATOR_V6 && instructionFound;
+    const data = getBase58Encoder().encode(ix.data).subarray(0, 8);
+    instructionFound = routeInstructions.find(([, discriminator]) => arraysEqual(data, discriminator))?.[0] ?? '';
+    return Boolean(instructionFound);
   });
 
   if (swapIxIdx === -1) throw new Error('Unable to find Jupiter Swap instruction');
@@ -91,11 +103,14 @@ async function main() {
     ['outputAmount', getU64Decoder()],
   ]);
 
+  // Each SwapsEvent entry is 112 bytes on-chain: the four documented fields plus the
+  // AMM program id. The published IDL omits `amm`, which misaligns every entry after the first.
   const SwapEventV2Decoder = getStructDecoder([
     ['inputMint', getAddressDecoder()],
     ['inputAmount', getU64Decoder()],
     ['outputMint', getAddressDecoder()],
     ['outputAmount', getU64Decoder()],
+    ['amm', getAddressDecoder()],
   ]);
 
   // "SwapsEvent" (RouteV2 - multiple swaps)
@@ -116,11 +131,8 @@ async function main() {
 
     const eventData = data.subarray(16);
 
-    if (
-      instructionFound === 'ROUTE_V2' ||
-      instructionFound === 'SHARED_ACCOUNTS_ROUTE_V2' ||
-      instructionFound === 'EXACT_OUT_ROUTE_V2'
-    ) {
+    // The event discriminator, not the instruction name, decides the layout.
+    if (arraysEqual(eventDiscriminator, SWAP_EVENT_DISCRIMINATOR_V2)) {
       const event = SwapsEventDecoder.decode(eventData);
 
       for (const swap of event.swapEvents) {
@@ -129,6 +141,7 @@ async function main() {
         console.log('  Input Amount:', swap.inputAmount.toString());
         console.log('  Output Mint:', swap.outputMint.toString());
         console.log('  Output Amount:', swap.outputAmount.toString());
+        console.log('  AMM:', swap.amm.toString());
       }
     } else {
       const event = SwapEventDecoder.decode(eventData);
